@@ -1,0 +1,168 @@
+---
+title: "Downloading GBIF Occurrences for Multiple Species in a Polygon"
+author: "Your Name"
+date: "`r format(Sys.Date())`"
+output: html_document
+---
+
+# ============================================================
+# Download GBIF occurrence data for specific species in a polygon
+# Author: [Your Name]
+# Date: [Today's date]
+# ============================================================
+
+```{r}
+
+
+# Load necessary packages
+
+library(rgbif)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+
+```
+
+
+# ---- 1. Define species of interest ----
+
+
+```{r}
+species_list <- c(
+  "Rana temporaria",     # Common frog
+  "Bufo bufo",           # Common toad
+  "Triturus cristatus",  # Great crested newt
+  "Pelophylax ridibundus" # Marsh frog
+)
+```
+
+
+
+# ---- 2. Define polygon (as WKT string) ----
+# Example: a small polygon roughly over part of Belgium
+
+```{r}
+
+##wkt_polygon <- "POLYGON((4.0 50.5, 5.0 50.5, 5.0 51.0, 4.0 51.0, 4.0 50.5))"
+```
+
+```{r}
+wkt_polygon <- "POLYGON((3.31787109375 49.84648456674507, 3.3837890625 49.390954746871806, 5.6689453125 48.94559445308591, 5.6689453125 49.775588649559154, 5.64697265625 50.395912897009076, 4.6142578125 50.68915014165799, 3.69140625 50.28372357925253, 3.31787109375 49.84648456674507))"
+```
+
+
+# ---- 3. Loop over species and download data ----
+```{r}
+
+occ_list <- list()
+
+for (sp in species_list) {
+  cat("Downloading data for:", sp, "...\n")
+  
+  res <- occ_search(
+    scientificName = sp,
+    geometry = wkt_polygon,
+    limit = 5000,
+    hasCoordinate = TRUE
+  )
+  
+  if (!is.null(res$data)) {
+    occ_list[[sp]] <- res$data
+  }
+}
+
+# ✅ Combine safely
+occ_data <- dplyr::bind_rows(occ_list) %>% distinct()
+
+cat("Total records downloaded:", nrow(occ_data), "\n")
+
+
+```
+# ---- 5. Optional: save to CSV ----
+
+```{r}
+write.csv(occ_data, "gbif_occurrences_polygon.csv", row.names = FALSE)
+cat("Data saved to: gbif_occurrences_polygon.csv\n")
+```
+
+# ---- 6. (Optional) Convert to spatial data ----
+
+```{r}
+occ_sf <- st_as_sf(
+  occ_data,
+  coords = c("decimalLongitude", "decimalLatitude"),
+  crs = 4326,
+  remove = FALSE
+)
+```
+
+
+```{r}
+plot(st_as_sfc(wkt_polygon), col = NA, border = "blue", main = "GBIF occurrences")
+plot(occ_sf["species"], add = TRUE, pch = 20, cex = 0.6, col = "darkgreen")
+
+```
+# Clean and prepare dates
+```{r}
+
+occ_data <- occ_data %>%
+  mutate(
+    year = as.numeric(year),
+    year = ifelse(is.na(year) & !is.na(eventDate),
+                  year(lubridate::ymd(eventDate)),
+                  year),
+    year_group = cut(year,
+                     breaks = seq(floor(min(year, na.rm = TRUE) / 5) * 5,
+                                  ceiling(max(year, na.rm = TRUE) / 5) * 5 + 5,
+                                  by = 5),
+                     right = FALSE,
+                     include.lowest = TRUE)
+  )
+```
+# Summarize counts per species and 5-year interval
+
+```{r}
+
+occ_summary <- occ_data %>%
+  filter(!is.na(year_group)) %>%
+  count(species, year_group, name = "records")
+```
+
+# Show table summary
+```{r}
+
+knitr::kable(occ_summary, col.names = c("Species", "5-year interval", "Number of Records"))
+```
+
+## Bar plot: total records per species across time
+```{r}
+
+ggplot(occ_summary, aes(x = year_group, y = records, fill = species)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "GBIF Occurrences per Species (5-year intervals)",
+    x = "5-year interval",
+    y = "Number of records",
+    fill = "Species"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+## Line plot: trends per species
+```{r}
+
+ggplot(occ_summary, aes(x = year_group, y = records, group = species, color = species)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Temporal trends of GBIF occurrences per species",
+    x = "5-year interval",
+    y = "Number of records"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
