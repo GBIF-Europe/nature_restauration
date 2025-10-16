@@ -2,6 +2,6 @@
 
 # ============================================================
 # Download GBIF occurrence data for specific species in a polygon
-# Author: [Your Name]
-# Date: [Today's date]
+# Author: [INDIGO team GNT]
+# Date: [2026/10/16]
 # ============================================================
